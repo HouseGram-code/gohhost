@@ -122,7 +122,12 @@ function fmtSize(bytes: number) {
 async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/bots/${BOT_ID}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      // Пропускаем страницу-предупреждение бесплатного ngrok для fetch-запросов.
+      "ngrok-skip-browser-warning": "true",
+      ...(init?.headers ?? {}),
+    },
   });
   return (await res.json()) as T;
 }
