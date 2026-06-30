@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import * as docker from "./docker";
@@ -8,8 +9,11 @@ import * as docker from "./docker";
 // Если Docker недоступен (например, локальная разработка на Windows) —
 // автоматически переключается в режим симуляции, чтобы UI работал везде.
 
-// Путь к данным внутри контейнера web.
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+// Путь к данным внутри контейнера web. По умолчанию — временная папка ОС
+// (на сервере задаётся /data; на Vercel/serverless cwd только для чтения,
+// поэтому пишем в /tmp).
+const DATA_DIR =
+  process.env.DATA_DIR || path.join(os.tmpdir(), "goh-hosting-data");
 // Путь к данным НА ХОСТЕ (для bind-mount дочерних контейнеров; задаётся в compose).
 const HOST_DATA_DIR = process.env.HOST_DATA_DIR || DATA_DIR;
 
@@ -86,12 +90,18 @@ function containerName(id: string) {
 }
 
 async function ensureDirs(id: string) {
-  await fs.mkdir(appDir(id), { recursive: true });
-  await fs.mkdir(path.dirname(configPath(id)), { recursive: true });
-  // Засеваем пример бота при первом обращении.
-  const files = await fs.readdir(appDir(id)).catch(() => [] as string[]);
-  if (files.length === 0) {
-    await fs.writeFile(path.join(appDir(id), "bot.py"), SAMPLE_BOT, "utf8");
+  // Устойчиво к read-only ФС (Vercel/serverless): если запись недоступна —
+  // не падаем, движок работает в демо-режиме без файлов.
+  try {
+    await fs.mkdir(appDir(id), { recursive: true });
+    await fs.mkdir(path.dirname(configPath(id)), { recursive: true });
+    // Засеваем пример бота при первом обращении.
+    const files = await fs.readdir(appDir(id)).catch(() => [] as string[]);
+    if (files.length === 0) {
+      await fs.writeFile(path.join(appDir(id), "bot.py"), SAMPLE_BOT, "utf8");
+    }
+  } catch {
+    /* ФС только для чтения — пропускаем */
   }
 }
 
@@ -136,7 +146,9 @@ function safeJoin(id: string, name: string): string {
 
 export async function listFiles(id: string): Promise<BotFile[]> {
   await ensureDirs(id);
-  const entries = await fs.readdir(appDir(id), { withFileTypes: true });
+  const entries = await fs
+    .readdir(appDir(id), { withFileTypes: true })
+    .catch(() => []);
   const out: BotFile[] = [];
   for (const e of entries) {
     const full = path.join(appDir(id), e.name);
