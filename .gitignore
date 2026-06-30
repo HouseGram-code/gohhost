@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# goh hosting — данные ботов (могут содержать токены), архивы, логи
+/data
+*.tgz
+*.log
+
+# но шаблон env коммитим
+!.env.example

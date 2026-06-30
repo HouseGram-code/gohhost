@@ -1,0 +1,80 @@
+services:
+  web:
+    build: .
+    image: goh-hosting:latest
+    container_name: goh-web
+    restart: unless-stopped
+    # root нужен для доступа к docker.sock (создание контейнеров ботов)
+    # и записи файлов ботов в ./data.
+    user: "0:0"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - DATA_DIR=/data
+      # Путь к данным НА ХОСТЕ — нужен для bind-mount дочерних контейнеров ботов.
+      # ${PWD} = папка, из которой запущен `docker compose up` (обычно /root/goh-hosting).
+      - HOST_DATA_DIR=${PWD}/data
+    expose:
+      - "3000"
+    volumes:
+      # ⚠ ДОСТУП К DOCKER-СОКЕТУ = ROOT НА ХОСТЕ. Запускайте здесь только своих ботов.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    networks:
+      - gohnet
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: goh-caddy
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    # Наружу порты не публикуем — доступ через Cloudflare Tunnel.
+    expose:
+      - "80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - gohnet
+    security_opt:
+      - no-new-privileges:true
+
+  # Постоянный публичный HTTPS-адрес через ngrok (статический домен).
+  # Адрес НЕ меняется при перезапусках. Значения берутся из файла .env.
+  tunnel:
+    image: ngrok/ngrok:latest
+    container_name: goh-tunnel
+    restart: unless-stopped
+    depends_on:
+      - caddy
+    command: http --url=${NGROK_URL} caddy:80
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    networks:
+      - gohnet
+
+networks:
+  gohnet:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

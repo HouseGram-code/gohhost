@@ -1,0 +1,38 @@
+# === Goh Hosting — обратный прокси (Caddy) ===
+# По умолчанию слушает HTTP :80 и проксирует на приложение — работает сразу по IP.
+# Для боевого домена закомментируйте блок ":80", раскомментируйте блок с доменом —
+# Caddy сам автоматически выпустит и продлит TLS-сертификат (HTTPS).
+
+:80 {
+	encode gzip zstd
+	reverse_proxy web:3000
+
+	# Ограничение размера тела запроса (анти-абуз).
+	request_body {
+		max_size 10MB
+	}
+
+	header {
+		-Server
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
+
+# yourdomain.com {
+# 	encode gzip zstd
+# 	reverse_proxy web:3000
+#
+# 	request_body {
+# 		max_size 10MB
+# 	}
+#
+# 	header {
+# 		-Server
+# 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+# 		X-Frame-Options "DENY"
+# 		X-Content-Type-Options "nosniff"
+# 		Referrer-Policy "strict-origin-when-cross-origin"
+# 	}
+# }
