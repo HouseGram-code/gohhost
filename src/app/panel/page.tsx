@@ -4,11 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ArrowRight,
   AtSign,
   Bot,
   Check,
   Clock,
-  Container,
   Cpu,
   File as FileIcon,
   FileCode,
@@ -23,6 +23,7 @@ import {
   Plus,
   RotateCw,
   Save,
+  Server,
   Settings,
   Square,
   Terminal,
@@ -45,6 +46,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 const BOT_ID = "demo";
+const PANEL_URL = process.env.NEXT_PUBLIC_PANEL_URL || "";
 
 type BotStatus =
   | "running"
@@ -63,7 +65,6 @@ interface BotState {
   ram: number;
   ramLimit: number;
   diskMb: number;
-  mode: "docker" | "simulated";
 }
 interface BotConfig {
   name: string;
@@ -132,6 +133,7 @@ export default function PanelPage() {
   const [logs, setLogs] = React.useState<string[]>([]);
   const [tab, setTab] = React.useState<TabId>("console");
   const [busy, setBusy] = React.useState<Action | null>(null);
+  const [available, setAvailable] = React.useState<boolean | null>(null);
 
   const [files, setFiles] = React.useState<BotFile[]>([]);
   const [editing, setEditing] = React.useState<{
@@ -154,7 +156,16 @@ export default function PanelPage() {
   const logRef = React.useRef<HTMLDivElement>(null);
 
   const refreshState = React.useCallback(async () => {
-    const d = await api<{ state?: BotState; config?: BotConfig }>("");
+    const d = await api<{
+      available?: boolean;
+      state?: BotState;
+      config?: BotConfig;
+    }>("");
+    if (d.available === false) {
+      setAvailable(false);
+      return;
+    }
+    setAvailable(true);
     if (d.state) setState(d.state);
     if (d.config) setConfig(d.config);
   }, []);
@@ -267,6 +278,38 @@ export default function PanelPage() {
   const running = status === "running";
   const isBusy = busy !== null;
 
+  if (available === false) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-6">
+        <Card className="w-full max-w-md border-border/60 bg-card/60 text-center backdrop-blur">
+          <CardHeader className="items-center gap-2">
+            <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-warning/15 text-warning">
+              <Server className="size-6" />
+            </div>
+            <CardTitle>Панель работает на сервере</CardTitle>
+            <CardDescription>
+              Реальный запуск ботов идёт на сервере хостинга. Здесь движок
+              недоступен. Откройте рабочую панель по адресу вашего сервера.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {PANEL_URL && (
+              <Button asChild size="lg" className="w-full">
+                <a href={PANEL_URL}>
+                  Открыть рабочую панель
+                  <ArrowRight className="size-4" />
+                </a>
+              </Button>
+            )}
+            <Button asChild variant="outline" size="lg" className="w-full">
+              <Link href="/">На главную</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!state) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
@@ -285,7 +328,7 @@ export default function PanelPage() {
       </div>
 
       {/* Верхняя панель */}
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/80 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <Button asChild variant="ghost" size="icon" className="size-9 shrink-0">
@@ -316,7 +359,6 @@ export default function PanelPage() {
                   />
                   {meta.label}
                 </span>
-                <ModeBadge mode={state.mode} />
               </div>
               <span className="text-xs text-muted-foreground">
                 Goh Hosting · бета 1.0
@@ -751,27 +793,6 @@ export default function PanelPage() {
         </main>
       </div>
     </div>
-  );
-}
-
-function ModeBadge({ mode }: { mode: "docker" | "simulated" }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        mode === "docker"
-          ? "border-success/30 bg-success/10 text-success"
-          : "border-warning/30 bg-warning/10 text-warning",
-      )}
-      title={
-        mode === "docker"
-          ? "Бот работает в изолированном окружении"
-          : "Демо-режим (движок недоступен)"
-      }
-    >
-      <Container className="size-3" />
-      {mode === "docker" ? "Изолированно" : "Демо"}
-    </span>
   );
 }
 

@@ -12,6 +12,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const tailParam = Number(new URL(req.url).searchParams.get("tail") || "200");
   const tail = Math.min(1000, Math.max(1, Number.isFinite(tailParam) ? tailParam : 200));
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ lines: [], available: false });
+    }
     const lines = await engine.getLogs(id, tail);
     return NextResponse.json({ lines });
   } catch (e) {

@@ -14,11 +14,15 @@ function maskToken(token: string) {
 export async function GET(_req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ available: false });
+    }
     const [state, config] = await Promise.all([
       engine.getState(id),
       engine.getConfig(id),
     ]);
     return NextResponse.json({
+      available: true,
       state,
       config: {
         name: config.name,
@@ -42,6 +46,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     token: string;
   }>;
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ error: "engine_unavailable" }, { status: 503 });
+    }
     const patch: Partial<engine.BotConfig> = {};
     if (typeof body.name === "string") patch.name = body.name;
     if (typeof body.startupFile === "string")

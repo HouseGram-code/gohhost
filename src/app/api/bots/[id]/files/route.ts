@@ -11,6 +11,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const name = new URL(req.url).searchParams.get("name");
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ files: [], available: false });
+    }
     if (name) {
       const content = await engine.readFile(id, name);
       return NextResponse.json({ name, content });
@@ -35,6 +38,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     );
   }
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ error: "engine_unavailable" }, { status: 503 });
+    }
     await engine.writeFile(id, body.name, body.content);
     return NextResponse.json({ ok: true });
   } catch (e) {
@@ -49,6 +55,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ error: "engine_unavailable" }, { status: 503 });
+    }
     await engine.deleteFile(id, name);
     return NextResponse.json({ ok: true });
   } catch (e) {

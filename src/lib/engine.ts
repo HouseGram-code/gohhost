@@ -4,17 +4,15 @@ import path from "node:path";
 
 import * as docker from "./docker";
 
-// ── Движок Goh Hosting ───────────────────────────────────────────────
-// Управляет ботами как отдельными Docker-контейнерами.
-// Если Docker недоступен (например, локальная разработка на Windows) —
-// автоматически переключается в режим симуляции, чтобы UI работал везде.
+// ── Движок Goh Hosting (только реальный режим) ───────────────────────
+// Запускает каждого бота в отдельном изолированном контейнере и держит
+// его онлайн 24/7 (политика автоперезапуска). Без симуляции.
+// Управление возможно только там, где доступен движок контейнеров
+// (на сервере). Проверяется через available().
 
-// Путь к данным внутри контейнера web. По умолчанию — временная папка ОС
-// (на сервере задаётся /data; на Vercel/serverless cwd только для чтения,
-// поэтому пишем в /tmp).
 const DATA_DIR =
   process.env.DATA_DIR || path.join(os.tmpdir(), "goh-hosting-data");
-// Путь к данным НА ХОСТЕ (для bind-mount дочерних контейнеров; задаётся в compose).
+// Путь к данным НА ХОСТЕ — для bind-mount дочерних контейнеров (из compose).
 const HOST_DATA_DIR = process.env.HOST_DATA_DIR || DATA_DIR;
 
 const RAM_LIMIT_MB = 150; // лимит бесплатного тарифа
@@ -43,7 +41,6 @@ export interface BotState {
   ram: number;
   ramLimit: number;
   diskMb: number;
-  mode: "docker" | "simulated";
 }
 
 export interface BotFile {
@@ -65,8 +62,8 @@ const SAMPLE_BOT = `import time, os
 
 print("Goh Hosting: бот запущен", flush=True)
 token = os.environ.get("BOT_TOKEN", "")
-print("Токен:", "задан" if token else "не задан (демо-режим)", flush=True)
-print("Чтобы запустить реального Telegram-бота, замените этот файл", flush=True)
+print("Токен:", "задан" if token else "не задан", flush=True)
+print("Замените этот файл на код своего Telegram-бота", flush=True)
 
 i = 0
 while True:
@@ -74,6 +71,11 @@ while True:
     print(f"[heartbeat] тик {i} — бот работает 24/7", flush=True)
     time.sleep(3)
 `;
+
+// ── Доступность движка ───────────────────────────────────────────────
+export async function available(): Promise<boolean> {
+  return docker.isAvailable();
+}
 
 // ── Пути ──────────────────────────────────────────────────────────────
 function appDir(id: string) {
@@ -90,18 +92,15 @@ function containerName(id: string) {
 }
 
 async function ensureDirs(id: string) {
-  // Устойчиво к read-only ФС (Vercel/serverless): если запись недоступна —
-  // не падаем, движок работает в демо-режиме без файлов.
   try {
     await fs.mkdir(appDir(id), { recursive: true });
     await fs.mkdir(path.dirname(configPath(id)), { recursive: true });
-    // Засеваем пример бота при первом обращении.
     const files = await fs.readdir(appDir(id)).catch(() => [] as string[]);
     if (files.length === 0) {
       await fs.writeFile(path.join(appDir(id), "bot.py"), SAMPLE_BOT, "utf8");
     }
   } catch {
-    /* ФС только для чтения — пропускаем */
+    /* ФС только для чтения — пропускаем (управление всё равно недоступно) */
   }
 }
 
@@ -134,7 +133,6 @@ function fileKind(name: string): BotFile["kind"] {
   return "file";
 }
 
-// Защита от выхода за пределы директории бота.
 function safeJoin(id: string, name: string): string {
   const base = appDir(id);
   const target = path.resolve(base, name);
@@ -184,7 +182,9 @@ export async function deleteFile(id: string, name: string): Promise<void> {
 async function dirSizeMb(id: string): Promise<number> {
   let total = 0;
   const walk = async (dir: string) => {
-    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    const entries = await fs
+      .readdir(dir, { withFileTypes: true })
+      .catch(() => []);
     for (const e of entries) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) await walk(full);
@@ -198,41 +198,7 @@ async function dirSizeMb(id: string): Promise<number> {
   return Math.round(total / (1024 * 1024));
 }
 
-// ── Симуляция (когда Docker недоступен) ──────────────────────────────
-interface SimState {
-  status: BotStatus;
-  startedAt: number;
-  logs: string[];
-}
-const sim = new Map<string, SimState>();
-function getSim(id: string): SimState {
-  let s = sim.get(id);
-  if (!s) {
-    s = {
-      status: "stopped",
-      startedAt: 0,
-      logs: [
-        "Goh Hosting — консоль управления ботом",
-        "Демо-режим (движок недоступен локально). На сервере бот запускается в изолированном окружении.",
-      ],
-    };
-    sim.set(id, s);
-  }
-  return s;
-}
-function simLog(s: SimState, line: string) {
-  const t = new Date().toLocaleTimeString("ru-RU", { hour12: false });
-  s.logs.push(`[${t}] ${line}`);
-  if (s.logs.length > 300) s.logs = s.logs.slice(-300);
-}
-
-// ── Определение режима ───────────────────────────────────────────────
-let dockerMode: boolean | null = null;
-async function useDocker(): Promise<boolean> {
-  if (dockerMode === null) dockerMode = await docker.isAvailable();
-  return dockerMode;
-}
-
+// ── Запуск контейнеров ───────────────────────────────────────────────
 function imageForFile(file: string): string {
   if (/\.(js|mjs|ts)$/i.test(file)) return "node:22-alpine";
   return "python:3.12-slim";
@@ -262,16 +228,6 @@ export async function start(id: string): Promise<void> {
   const cfg = await getConfig(id);
   await ensureDirs(id);
 
-  if (!(await useDocker())) {
-    const s = getSim(id);
-    s.status = "running";
-    s.startedAt = Date.now();
-    simLog(s, "→ Запуск (симуляция)…");
-    simLog(s, `Команда: ${startCommand(cfg.startupFile).slice(-1)[0]}`);
-    simLog(s, "✓ Бот «запущен» в режиме симуляции.");
-    return;
-  }
-
   const name = containerName(id);
   await docker.remove(name).catch(() => {});
   const image = imageForFile(cfg.startupFile);
@@ -285,31 +241,17 @@ export async function start(id: string): Promise<void> {
     memoryMb: RAM_LIMIT_MB,
     nanoCpus: Math.round(CPU_LIMIT * 1e9),
     pidsLimit: PIDS_LIMIT,
-    autoRestart: cfg.autoRestart,
+    autoRestart: cfg.autoRestart, // unless-stopped => бот живёт 24/7
     labels: { "goh.bot": id },
   });
   await docker.start(name);
 }
 
 export async function stop(id: string): Promise<void> {
-  if (!(await useDocker())) {
-    const s = getSim(id);
-    s.status = "stopped";
-    simLog(s, "✓ Бот остановлен (симуляция).");
-    return;
-  }
   await docker.stop(containerName(id));
 }
 
 export async function restart(id: string): Promise<void> {
-  if (!(await useDocker())) {
-    const s = getSim(id);
-    s.status = "running";
-    s.startedAt = Date.now();
-    simLog(s, "✓ Бот перезагружен (симуляция).");
-    return;
-  }
-  // Если контейнера ещё нет — создаём через start, иначе перезапускаем.
   const info = await docker.inspect(containerName(id));
   if (!info) await start(id);
   else await docker.restart(containerName(id));
@@ -317,20 +259,6 @@ export async function restart(id: string): Promise<void> {
 
 export async function getState(id: string): Promise<BotState> {
   const diskMb = await dirSizeMb(id).catch(() => 0);
-
-  if (!(await useDocker())) {
-    const s = getSim(id);
-    const running = s.status === "running";
-    return {
-      status: s.status,
-      uptimeSec: running ? Math.floor((Date.now() - s.startedAt) / 1000) : 0,
-      cpu: running ? Math.round((Math.random() * 6 + 2) * 10) / 10 : 0,
-      ram: running ? Math.round(Math.random() * 35 + 60) : 0,
-      ramLimit: RAM_LIMIT_MB,
-      diskMb,
-      mode: "simulated",
-    };
-  }
 
   const info = await docker.inspect(containerName(id)).catch(() => null);
   if (!info) {
@@ -341,7 +269,6 @@ export async function getState(id: string): Promise<BotState> {
       ram: 0,
       ramLimit: RAM_LIMIT_MB,
       diskMb,
-      mode: "docker",
     };
   }
 
@@ -366,31 +293,10 @@ export async function getState(id: string): Promise<BotState> {
     }
   }
 
-  return {
-    status,
-    uptimeSec,
-    cpu,
-    ram,
-    ramLimit: RAM_LIMIT_MB,
-    diskMb,
-    mode: "docker",
-  };
+  return { status, uptimeSec, cpu, ram, ramLimit: RAM_LIMIT_MB, diskMb };
 }
 
 export async function getLogs(id: string, tail = 200): Promise<string[]> {
-  if (!(await useDocker())) {
-    const s = getSim(id);
-    // В симуляции добавляем «тик», если запущен, чтобы лог жил.
-    if (s.status === "running") {
-      const ticks = Math.floor((Date.now() - s.startedAt) / 3000);
-      const last = s.logs[s.logs.length - 1] || "";
-      if (!last.includes(`тик ${ticks}`) && ticks > 0) {
-        simLog(s, `[heartbeat] тик ${ticks} — бот работает 24/7`);
-      }
-    }
-    return s.logs.slice(-tail);
-  }
-
   const raw = await docker.logs(containerName(id), tail).catch(() => "");
   if (!raw.trim()) return [];
   return raw.split(/\r?\n/).filter((l) => l.length > 0);

@@ -13,6 +13,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const action = body.action;
 
   try {
+    if (!(await engine.available())) {
+      return NextResponse.json({ error: "engine_unavailable" }, { status: 503 });
+    }
     if (action === "start") await engine.start(id);
     else if (action === "stop") await engine.stop(id);
     else if (action === "restart") await engine.restart(id);

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   Activity,
   ArrowRight,
@@ -55,6 +54,8 @@ const planFeatures = [
 ];
 
 export default function Home() {
+  // Если задан адрес рабочей панели (сервер) — кнопки ведут туда, иначе /panel.
+  const panelUrl = process.env.NEXT_PUBLIC_PANEL_URL || "/panel";
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden scroll-smooth">
       {/* Декоративное свечение фона */}
@@ -65,7 +66,7 @@ export default function Home() {
       </div>
 
       {/* Шапка */}
-      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 pb-5 pt-[calc(env(safe-area-inset-top)+1.25rem)]">
         <div className="flex items-center gap-2.5">
           <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/30">
             <Bot className="size-5" />
@@ -80,10 +81,10 @@ export default function Home() {
           </div>
         </div>
         <Button asChild variant="ghost" size="sm">
-          <Link href="/panel">
+          <a href={panelUrl}>
             Панель управления
             <ArrowRight className="size-4" />
-          </Link>
+          </a>
         </Button>
       </header>
 
@@ -119,10 +120,10 @@ export default function Home() {
               </a>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="/panel">
+              <a href={panelUrl}>
                 <Rocket className="size-4" />
                 Открыть панель
-              </Link>
+              </a>
             </Button>
           </div>
 
@@ -220,10 +221,10 @@ export default function Home() {
                 size="lg"
                 className="w-full shadow-lg shadow-primary/30"
               >
-                <Link href="/panel">
+                <a href={panelUrl}>
                   Взять бесплатно
                   <ArrowRight className="size-4" />
-                </Link>
+                </a>
               </Button>
             </CardContent>
           </Card>
