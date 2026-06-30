@@ -301,3 +301,7 @@ export async function getLogs(id: string, tail = 200): Promise<string[]> {
   if (!raw.trim()) return [];
   return raw.split(/\r?\n/).filter((l) => l.length > 0);
 }
+
+export async function destroy(id: string): Promise<void> {
+  await docker.remove(containerName(id)).catch(() => {});
+}
