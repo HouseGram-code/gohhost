@@ -1,13 +1,23 @@
 import {
   Activity,
   ArrowRight,
+  Ban,
+  BookText,
   Bot,
   Check,
   Cpu,
+  FileCode,
   Gauge,
+  Gift,
   HardDrive,
+  KeyRound,
+  ListChecks,
+  Lock,
+  LogIn,
   MemoryStick,
+  Play,
   Rocket,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Zap,
@@ -53,6 +63,62 @@ const planFeatures = [
   { icon: HardDrive, text: "Хранилище для файлов бота" },
 ];
 
+const steps = [
+  {
+    icon: Bot,
+    title: "Создай сервер",
+    text: "В Telegram-боте (/start → Создать сервер) или прямо на сайте.",
+  },
+  {
+    icon: LogIn,
+    title: "Войди на сайт",
+    text: "По нику и паролю, которые задал при создании сервера.",
+  },
+  {
+    icon: FileCode,
+    title: "Загрузи код",
+    text: "Вкладка «Файлы» — вставь код своего бота (Python или Node).",
+  },
+  {
+    icon: KeyRound,
+    title: "Укажи токен",
+    text: "Вкладка «Настройки» — токен от @BotFather и файл запуска.",
+  },
+  {
+    icon: Play,
+    title: "Запусти",
+    text: "Кнопка «Запустить» — бот поднимется и работает 24/7.",
+  },
+];
+
+const rules = [
+  {
+    icon: Gift,
+    title: "Один бесплатный сервер",
+    text: "На аккаунт — один бесплатный сервер с 150 МБ оперативной памяти.",
+  },
+  {
+    icon: Bot,
+    title: "Только свои боты",
+    text: "Запускай только свой код. Чужой и вредоносный — запрещён.",
+  },
+  {
+    icon: Ban,
+    title: "Без спама и флуда",
+    text: "Соблюдай правила Telegram: спам и массовые рассылки запрещены.",
+  },
+  {
+    icon: ShieldAlert,
+    title: "Без вредной активности",
+    text: "Майнинг, DDoS, обход систем и любые незаконные действия запрещены.",
+  },
+  {
+    icon: Lock,
+    title: "Береги доступы",
+    text: "Не передавай токен и пароль третьим лицам — сервер на твоей ответственности.",
+  },
+];
+
 export default function Home() {
   // Если задан адрес рабочей панели (сервер) — кнопки ведут туда, иначе /panel.
   const panelUrl = process.env.NEXT_PUBLIC_PANEL_URL || "/panel";
@@ -80,12 +146,21 @@ export default function Home() {
             </Badge>
           </div>
         </div>
-        <Button asChild variant="ghost" size="sm">
-          <a href={panelUrl}>
-            Панель управления
-            <ArrowRight className="size-4" />
-          </a>
-        </Button>
+        <div className="flex items-center gap-1 sm:gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href="#rules">
+              <BookText className="size-4" />
+              <span className="hidden sm:inline">Правила</span>
+            </a>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <a href={panelUrl}>
+              <span className="hidden sm:inline">Панель управления</span>
+              <span className="sm:hidden">Панель</span>
+              <ArrowRight className="size-4" />
+            </a>
+          </Button>
+        </div>
       </header>
 
       {/* Hero */}
@@ -163,6 +238,65 @@ export default function Home() {
           ))}
         </section>
 
+        {/* Как пользоваться */}
+        <section
+          id="how"
+          className="flex w-full scroll-mt-20 flex-col items-center py-16"
+        >
+          <Badge
+            variant="outline"
+            className="mb-4 gap-1.5 border-primary/30 bg-primary/10 text-primary"
+          >
+            <ListChecks className="size-3.5" />
+            Как пользоваться
+          </Badge>
+          <h2 className="text-balance text-center text-3xl font-bold tracking-tight sm:text-4xl">
+            Запуск за 5 шагов
+          </h2>
+          <p className="mt-3 max-w-xl text-balance text-center text-muted-foreground">
+            От создания сервера до работающего бота — пара минут.
+          </p>
+
+          <div className="mt-10 grid w-full gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {steps.map((s, i) => (
+              <Card
+                key={s.title}
+                className="border-border/60 bg-card/60 backdrop-blur transition-colors hover:border-primary/40"
+              >
+                <CardHeader>
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/20">
+                      <s.icon className="size-5" />
+                    </div>
+                    <span className="text-2xl font-bold text-muted-foreground/30">
+                      {i + 1}
+                    </span>
+                  </div>
+                  <CardTitle className="text-base">{s.title}</CardTitle>
+                  <CardDescription className="text-sm leading-relaxed">
+                    {s.text}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+            <Button asChild size="lg" className="shadow-lg shadow-primary/30">
+              <a href={panelUrl}>
+                <Rocket className="size-4" />
+                Начать сейчас
+              </a>
+            </Button>
+            <Button asChild size="lg" variant="outline">
+              <a href="#rules">
+                <BookText className="size-4" />
+                Правила
+              </a>
+            </Button>
+          </div>
+        </section>
+
         {/* Тариф */}
         <section
           id="tariff"
@@ -228,6 +362,57 @@ export default function Home() {
               </Button>
             </CardContent>
           </Card>
+        </section>
+
+        {/* Правила */}
+        <section
+          id="rules"
+          className="flex w-full scroll-mt-20 flex-col items-center py-16"
+        >
+          <Badge
+            variant="outline"
+            className="mb-4 gap-1.5 border-primary/30 bg-primary/10 text-primary"
+          >
+            <BookText className="size-3.5" />
+            Правила
+          </Badge>
+          <h2 className="text-balance text-center text-3xl font-bold tracking-tight sm:text-4xl">
+            Правила сервиса
+          </h2>
+          <p className="mt-3 max-w-xl text-balance text-center text-muted-foreground">
+            Коротко и по делу — чтобы всем было удобно и безопасно.
+          </p>
+
+          <div className="mt-10 grid w-full max-w-4xl gap-4 sm:grid-cols-2">
+            {rules.map((r, i) => (
+              <Card
+                key={r.title}
+                className="border-border/60 bg-card/60 backdrop-blur transition-colors hover:border-primary/40"
+              >
+                <CardContent className="flex items-start gap-4 py-5">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/20">
+                    <r.icon className="size-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-bold text-primary">
+                        {i + 1}
+                      </span>
+                      <h3 className="font-semibold">{r.title}</h3>
+                    </div>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      {r.text}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          <p className="mt-6 max-w-xl text-balance text-center text-xs text-muted-foreground">
+            Нарушение правил может привести к остановке сервера. Пользуясь Goh
+            Hosting, ты соглашаешься с ними.
+          </p>
         </section>
       </main>
 
