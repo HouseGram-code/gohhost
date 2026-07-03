@@ -28,6 +28,10 @@ services:
       - ./data:/data
       # Скрипт автообновления (read-only)
       - ./update.sh:/update.sh:ro
+      # Весь репозиторий хоста примонтирован по тому же абсолютному пути —
+      # нужно, чтобы `git pull` / `docker compose build` внутри контейнера
+      # (через хостовый docker.sock) видели корректные пути на хосте.
+      - ${PWD}:${PWD}
     networks:
       - gohnet
     healthcheck:

@@ -24,6 +24,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Инструменты для автообновления (git pull + docker compose build/up на хосте через docker.sock).
+RUN apk add --no-cache bash git docker-cli docker-cli-compose docker-cli-buildx
+
 # Непривилегированный пользователь.
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
