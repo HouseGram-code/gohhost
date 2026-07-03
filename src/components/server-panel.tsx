@@ -8,6 +8,7 @@ import {
   Check,
   Clock,
   Cpu,
+  Download,
   File as FileIcon,
   FileCode,
   FileJson,
@@ -17,6 +18,7 @@ import {
   HardDrive,
   Loader2,
   MemoryStick,
+  Package,
   Pencil,
   Play,
   Plus,
@@ -157,6 +159,14 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
   const [formReady, setFormReady] = React.useState(false);
   const [savingSettings, setSavingSettings] = React.useState(false);
   const [savedSettings, setSavedSettings] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+
+  const [pkgInput, setPkgInput] = React.useState("");
+  const [installingPkg, setInstallingPkg] = React.useState(false);
+  const [pkgResult, setPkgResult] = React.useState<{
+    ok: boolean;
+    output: string;
+  } | null>(null);
 
   const logRef = React.useRef<HTMLDivElement>(null);
 
@@ -235,15 +245,31 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
 
   const doAction = async (action: Action) => {
     setBusy(action);
+    setActionError(null);
     try {
-      const d = await serverApi<{ state?: BotState }>(serverId, "/action", {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      });
-      if (d.state) setState(d.state);
+      // ИСПРАВЛЕНИЕ: раньше ошибка от API (например, недоступен движок)
+      // молча проглатывалась — кнопка просто переставала «крутиться» без
+      // единого слова о причине. Теперь показываем баннер с ошибкой.
+      const d = await serverApi<{ state?: BotState; error?: string }>(
+        serverId,
+        "/action",
+        {
+          method: "POST",
+          body: JSON.stringify({ action }),
+        },
+      );
+      if (d.error) {
+        setActionError(
+          d.error === "engine_unavailable"
+            ? "Движок недоступен. Попробуйте ещё раз чуть позже."
+            : d.error,
+        );
+      } else if (d.state) {
+        setState(d.state);
+      }
       await refreshLogs();
-    } catch {
-      /* poll подхватит состояние */
+    } catch (e) {
+      setActionError(String(e));
     } finally {
       setBusy(null);
     }
@@ -291,6 +317,32 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
       window.setTimeout(() => setSavedSettings(false), 2500);
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const installPackages = async () => {
+    if (!pkgInput.trim() || installingPkg) return;
+    setInstallingPkg(true);
+    setPkgResult(null);
+    try {
+      const d = await serverApi<{
+        ok?: boolean;
+        output?: string;
+        error?: string;
+      }>(serverId, "/packages", {
+        method: "POST",
+        body: JSON.stringify({ packages: pkgInput }),
+      });
+      if (d.error) {
+        setPkgResult({ ok: false, output: d.error });
+      } else {
+        setPkgResult({ ok: !!d.ok, output: d.output ?? "" });
+        if (d.ok) setPkgInput("");
+      }
+    } catch (e) {
+      setPkgResult({ ok: false, output: String(e) });
+    } finally {
+      setInstallingPkg(false);
     }
   };
 
@@ -411,6 +463,22 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
           </div>
         </div>
       </header>
+
+      {actionError && (
+        <div className="mx-auto mt-4 w-full max-w-6xl px-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive duration-300 animate-in fade-in">
+            <span>{actionError}</span>
+            <button
+              type="button"
+              onClick={() => setActionError(null)}
+              aria-label="Скрыть"
+              className="shrink-0 rounded-md p-1 hover:bg-destructive/10"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row">
         <aside className="lg:w-72 lg:shrink-0">
@@ -677,6 +745,7 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
           )}
 
           {tab === "settings" && (
+            <div className="flex flex-col gap-6">
             <Card
               key="settings"
               className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
@@ -796,6 +865,87 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
                 </form>
               </CardContent>
             </Card>
+
+            <Card
+              key="packages"
+              className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Package className="size-4 text-primary" />
+                  Python-библиотеки (pip)
+                </CardTitle>
+                <CardDescription>
+                  Установите дополнительный пакет pip для бота. Он попадёт в{" "}
+                  <span className="font-mono text-foreground">
+                    requirements.txt
+                  </span>{" "}
+                  и будет установлен сразу, если бот сейчас запущен — без
+                  перезапуска.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={pkgInput}
+                    onChange={(e) => setPkgInput(e.target.value)}
+                    placeholder="requests aiohttp==3.9.5"
+                    className="font-mono"
+                    disabled={installingPkg}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        installPackages();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={installPackages}
+                    disabled={installingPkg || !pkgInput.trim()}
+                  >
+                    {installingPkg ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Download className="size-4" />
+                    )}
+                    Установить
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Несколько пакетов — через пробел или запятую, версию можно
+                  указать так:{" "}
+                  <span className="font-mono text-foreground">pandas==2.2.2</span>.
+                  Доступно только для Python-ботов (файл запуска{" "}
+                  <span className="font-mono text-foreground">.py</span>).
+                </p>
+                {pkgResult && (
+                  <div
+                    className={cn(
+                      "flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs duration-300 animate-in fade-in",
+                      pkgResult.ok
+                        ? "border-success/30 bg-success/10 text-success"
+                        : "border-destructive/30 bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {pkgResult.ok ? (
+                        <Check className="size-3.5" />
+                      ) : (
+                        <X className="size-3.5" />
+                      )}
+                      {pkgResult.ok ? "Готово" : "Ошибка установки"}
+                    </span>
+                    {pkgResult.output && (
+                      <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] text-foreground/80">
+                        {pkgResult.output}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            </div>
           )}
         </main>
       </div>

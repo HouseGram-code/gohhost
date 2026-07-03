@@ -103,6 +103,61 @@ export async function ensureImage(image: string): Promise<void> {
   if (res.status >= 400) {
     throw new Error(`pull failed (${res.status}): ${res.body}`);
   }
+  // ИСПРАВЛЕНИЕ: Docker Engine возвращает 200 и стримит построчный JSON,
+  // даже если сама загрузка образа упала (например, образ не найден или нет
+  // сети) — по HTTP-статусу это не видно, ошибка приходит внутри потока.
+  // Без этой проверки ensureImage() «успешно» завершался, а следующий
+  // create() падал с непонятным "No such image".
+  const failedPull = res.body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as { error?: string };
+      } catch {
+        return null;
+      }
+    })
+    .find((entry) => entry?.error);
+  if (failedPull?.error) {
+    throw new Error(`pull failed: ${failedPull.error}`);
+  }
+}
+
+/** Выполняет команду внутри уже запущенного контейнера (аналог `docker exec`). */
+export async function exec(
+  name: string,
+  cmd: string[],
+): Promise<{ exitCode: number; output: string }> {
+  const create = await request("POST", `/containers/${name}/exec`, {
+    Cmd: cmd,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: true,
+  });
+  if (create.status >= 400) {
+    throw new Error(`exec create failed (${create.status}): ${create.body}`);
+  }
+  const { Id: execId } = parse<{ Id: string }>(create);
+
+  // Tty:true => плоский текст в ответе, без мультиплексирования (как в logs()).
+  const start = await request("POST", `/exec/${execId}/start`, {
+    Detach: false,
+    Tty: true,
+  });
+  if (start.status >= 400) {
+    throw new Error(`exec start failed (${start.status}): ${start.body}`);
+  }
+  // eslint-disable-next-line no-control-regex
+  const output = start.body.replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
+
+  let exitCode = 0;
+  const inspect = await request("GET", `/exec/${execId}/json`);
+  if (inspect.status < 400) {
+    exitCode = parse<{ ExitCode: number | null }>(inspect).ExitCode ?? 0;
+  }
+  return { exitCode, output };
 }
 
 export interface CreateOptions {
