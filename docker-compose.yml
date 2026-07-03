@@ -17,12 +17,17 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - BOT_API_KEY=${BOT_API_KEY}
       - SITE_URL=${SITE_URL}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      # Путь к репозиторию на хосте (для автообновления)
+      - HOST_REPO_DIR=${PWD}
     expose:
       - "3000"
     volumes:
       # ⚠ ДОСТУП К DOCKER-СОКЕТУ = ROOT НА ХОСТЕ. Запускайте здесь только своих ботов.
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/data
+      # Скрипт автообновления (read-only)
+      - ./update.sh:/update.sh:ro
     networks:
       - gohnet
     healthcheck:

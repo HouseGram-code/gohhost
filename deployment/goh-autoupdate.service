@@ -1,0 +1,21 @@
+# Systemd-сервис для мониторинга автообновлений (опционально)
+# Установка: sudo cp deployment/goh-autoupdate.service /etc/systemd/system/
+#            sudo systemctl enable goh-autoupdate
+#            sudo systemctl start goh-autoupdate
+
+[Unit]
+Description=Goh Hosting Auto-Update Monitor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/goh-hosting
+ExecStart=/root/goh-hosting/update.sh
+StandardOutput=append:/var/log/goh-autoupdate.log
+StandardError=append:/var/log/goh-autoupdate.log
+User=root
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

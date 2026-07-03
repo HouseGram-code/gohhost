@@ -212,6 +212,7 @@ export default function ServerPanel({ serverId }: { serverId: string }) {
     const t = window.setInterval(() => {
       refreshState();
       refreshLogs();
+      loadFiles();
     }, 2000);
     return () => window.clearInterval(t);
   }, [refreshState, refreshLogs, loadFiles]);
