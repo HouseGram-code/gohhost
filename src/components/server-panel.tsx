@@ -1,0 +1,1009 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  Check,
+  Clock,
+  Cpu,
+  Download,
+  File as FileIcon,
+  FileCode,
+  FileJson,
+  FileText,
+  Folder,
+  Hash,
+  HardDrive,
+  Loader2,
+  MemoryStick,
+  Package,
+  Pencil,
+  Play,
+  Plus,
+  RotateCw,
+  Save,
+  Server,
+  Settings,
+  Square,
+  Terminal,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+
+type BotStatus =
+  | "running"
+  | "stopped"
+  | "starting"
+  | "stopping"
+  | "restarting"
+  | "error";
+type TabId = "console" | "files" | "settings";
+type Action = "start" | "stop" | "restart";
+
+interface BotState {
+  status: BotStatus;
+  uptimeSec: number;
+  cpu: number;
+  ram: number;
+  ramLimit: number;
+  diskMb: number;
+}
+interface BotConfig {
+  name: string;
+  startupFile: string;
+  autoRestart: boolean;
+  token: string;
+  tokenSet: boolean;
+}
+interface BotFile {
+  name: string;
+  size: number;
+  modified: string;
+  kind: "code" | "json" | "text" | "file";
+}
+
+const statusMeta: Record<
+  BotStatus,
+  { label: string; dot: string; text: string; pulse: boolean }
+> = {
+  running: { label: "Онлайн", dot: "bg-success", text: "text-success", pulse: true },
+  stopped: { label: "Оффлайн", dot: "bg-muted-foreground", text: "text-muted-foreground", pulse: false },
+  starting: { label: "Запуск…", dot: "bg-warning", text: "text-warning", pulse: true },
+  stopping: { label: "Остановка…", dot: "bg-warning", text: "text-warning", pulse: true },
+  restarting: { label: "Перезагрузка…", dot: "bg-warning", text: "text-warning", pulse: true },
+  error: { label: "Ошибка", dot: "bg-destructive", text: "text-destructive", pulse: false },
+};
+
+const tabs: { id: TabId; label: string; icon: LucideIcon }[] = [
+  { id: "console", label: "Управление", icon: Terminal },
+  { id: "files", label: "Файлы", icon: Folder },
+  { id: "settings", label: "Настройки", icon: Settings },
+];
+
+const fileIcons: Record<BotFile["kind"], LucideIcon> = {
+  code: FileCode,
+  json: FileJson,
+  text: FileText,
+  file: FileIcon,
+};
+
+function fmtUptime(s: number) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h} ч ${m} м`;
+  if (m > 0) return `${m} м ${sec} с`;
+  return `${sec} с`;
+}
+function fmtSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+async function serverApi<T = unknown>(
+  serverId: string,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetch(`/api/servers/${serverId}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      ...(init?.headers ?? {}),
+    },
+  });
+  return (await res.json()) as T;
+}
+
+export default function ServerPanel({ serverId }: { serverId: string }) {
+  const router = useRouter();
+  const [state, setState] = React.useState<BotState | null>(null);
+  const [config, setConfig] = React.useState<BotConfig | null>(null);
+  const [logs, setLogs] = React.useState<string[]>([]);
+  const [tab, setTab] = React.useState<TabId>("console");
+  const [busy, setBusy] = React.useState<Action | null>(null);
+  const [available, setAvailable] = React.useState<boolean | null>(null);
+
+  const [files, setFiles] = React.useState<BotFile[]>([]);
+  const [editing, setEditing] = React.useState<{
+    name: string;
+    content: string;
+    isNew: boolean;
+  } | null>(null);
+  const [savingFile, setSavingFile] = React.useState(false);
+
+  const [form, setForm] = React.useState({
+    name: "",
+    startupFile: "",
+    autoRestart: true,
+    token: "",
+  });
+  const [formReady, setFormReady] = React.useState(false);
+  const [savingSettings, setSavingSettings] = React.useState(false);
+  const [savedSettings, setSavedSettings] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+
+  const [pkgInput, setPkgInput] = React.useState("");
+  const [installingPkg, setInstallingPkg] = React.useState(false);
+  const [pkgResult, setPkgResult] = React.useState<{
+    ok: boolean;
+    output: string;
+  } | null>(null);
+
+  const logRef = React.useRef<HTMLDivElement>(null);
+
+  const handleError = React.useCallback(
+    (error?: string) => {
+      if (error === "unauthorized") {
+        router.push("/login");
+        return true;
+      }
+      if (error === "forbidden") {
+        router.push("/panel");
+        return true;
+      }
+      return false;
+    },
+    [router],
+  );
+
+  const refreshState = React.useCallback(async () => {
+    const d = await serverApi<{
+      available?: boolean;
+      state?: BotState;
+      config?: BotConfig;
+      error?: string;
+    }>(serverId, "");
+    if (handleError(d.error)) return;
+    if (d.available === false) {
+      setAvailable(false);
+      return;
+    }
+    setAvailable(true);
+    if (d.state) setState(d.state);
+    if (d.config) setConfig(d.config);
+  }, [serverId, handleError]);
+
+  const refreshLogs = React.useCallback(async () => {
+    const d = await serverApi<{ lines?: string[] }>(
+      serverId,
+      "/logs?tail=300",
+    );
+    if (Array.isArray(d.lines)) setLogs(d.lines);
+  }, [serverId]);
+
+  const loadFiles = React.useCallback(async () => {
+    const d = await serverApi<{ files?: BotFile[] }>(serverId, "/files");
+    if (Array.isArray(d.files)) setFiles(d.files);
+  }, [serverId]);
+
+  React.useEffect(() => {
+    refreshState();
+    refreshLogs();
+    loadFiles();
+    const t = window.setInterval(() => {
+      refreshState();
+      refreshLogs();
+      loadFiles();
+    }, 2000);
+    return () => window.clearInterval(t);
+  }, [refreshState, refreshLogs, loadFiles]);
+
+  React.useEffect(() => {
+    if (config && !formReady) {
+      setForm({
+        name: config.name,
+        startupFile: config.startupFile,
+        autoRestart: config.autoRestart,
+        token: "",
+      });
+      setFormReady(true);
+    }
+  }, [config, formReady]);
+
+  React.useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
+  const doAction = async (action: Action) => {
+    setBusy(action);
+    setActionError(null);
+    try {
+      // ИСПРАВЛЕНИЕ: раньше ошибка от API (например, недоступен движок)
+      // молча проглатывалась — кнопка просто переставала «крутиться» без
+      // единого слова о причине. Теперь показываем баннер с ошибкой.
+      const d = await serverApi<{ state?: BotState; error?: string }>(
+        serverId,
+        "/action",
+        {
+          method: "POST",
+          body: JSON.stringify({ action }),
+        },
+      );
+      if (d.error) {
+        setActionError(
+          d.error === "engine_unavailable"
+            ? "Движок недоступен. Попробуйте ещё раз чуть позже."
+            : d.error,
+        );
+      } else if (d.state) {
+        setState(d.state);
+      }
+      await refreshLogs();
+    } catch (e) {
+      setActionError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openFile = async (name: string) => {
+    const d = await serverApi<{ content?: string }>(
+      serverId,
+      `/files?name=${encodeURIComponent(name)}`,
+    );
+    setEditing({ name, content: d.content ?? "", isNew: false });
+  };
+  const saveFile = async () => {
+    if (!editing || !editing.name.trim()) return;
+    setSavingFile(true);
+    try {
+      await serverApi(serverId, "/files", {
+        method: "POST",
+        body: JSON.stringify({ name: editing.name, content: editing.content }),
+      });
+      await loadFiles();
+      setEditing(null);
+    } finally {
+      setSavingFile(false);
+    }
+  };
+  const removeFile = async (name: string) => {
+    await serverApi(serverId, `/files?name=${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    await loadFiles();
+  };
+
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const d = await serverApi<{ config?: BotConfig }>(serverId, "", {
+        method: "PATCH",
+        body: JSON.stringify(form),
+      });
+      if (d.config) setConfig(d.config);
+      setForm((f) => ({ ...f, token: "" }));
+      setSavedSettings(true);
+      window.setTimeout(() => setSavedSettings(false), 2500);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const installPackages = async () => {
+    if (!pkgInput.trim() || installingPkg) return;
+    setInstallingPkg(true);
+    setPkgResult(null);
+    try {
+      const d = await serverApi<{
+        ok?: boolean;
+        output?: string;
+        error?: string;
+      }>(serverId, "/packages", {
+        method: "POST",
+        body: JSON.stringify({ packages: pkgInput }),
+      });
+      if (d.error) {
+        setPkgResult({ ok: false, output: d.error });
+      } else {
+        setPkgResult({ ok: !!d.ok, output: d.output ?? "" });
+        if (d.ok) setPkgInput("");
+      }
+    } catch (e) {
+      setPkgResult({ ok: false, output: String(e) });
+    } finally {
+      setInstallingPkg(false);
+    }
+  };
+
+  const transitional: BotStatus | null = busy
+    ? (({ start: "starting", stop: "stopping", restart: "restarting" } as const)[
+        busy
+      ] as BotStatus)
+    : null;
+  const status: BotStatus = transitional ?? state?.status ?? "stopped";
+  const meta = statusMeta[status];
+  const running = status === "running";
+  const isBusy = busy !== null;
+
+  if (available === false) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-6">
+        <Card className="w-full max-w-md border-border/60 bg-card/60 text-center backdrop-blur">
+          <CardHeader className="items-center gap-2">
+            <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-warning/15 text-warning">
+              <Server className="size-6" />
+            </div>
+            <CardTitle>Движок недоступен</CardTitle>
+            <CardDescription>
+              Управление контейнерами недоступно на этом адресе. Откройте панель
+              на рабочем сервере.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" size="lg" className="w-full">
+              <Link href="/panel">К списку серверов</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!state) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="size-7 animate-spin text-primary" />
+          <span className="text-sm">Загрузка сервера…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex min-h-dvh flex-col">
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute -top-40 left-1/4 h-[32rem] w-[32rem] rounded-full bg-primary/10 blur-[120px]" />
+      </div>
+
+      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <Button asChild variant="ghost" size="icon" className="size-9 shrink-0">
+              <Link href="/panel" aria-label="К списку серверов">
+                <ArrowLeft className="size-4" />
+              </Link>
+            </Button>
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/30">
+              <Server className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate font-semibold">
+                  {config?.name ?? "Сервер"}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-2.5 py-0.5 text-xs font-medium transition-colors",
+                    meta.text,
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "size-2 rounded-full",
+                      meta.dot,
+                      meta.pulse && "animate-pulse",
+                    )}
+                  />
+                  {meta.label}
+                </span>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                Goh Hosting · бета 1.0
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton
+              variant="success"
+              icon={Play}
+              label="Запустить"
+              loading={busy === "start"}
+              disabled={running || isBusy}
+              onClick={() => doAction("start")}
+            />
+            <ActionButton
+              variant="secondary"
+              icon={RotateCw}
+              label="Перезагрузить"
+              loading={busy === "restart"}
+              disabled={!running || isBusy}
+              onClick={() => doAction("restart")}
+            />
+            <ActionButton
+              variant="destructive"
+              icon={Square}
+              label="Остановить"
+              loading={busy === "stop"}
+              disabled={!running || isBusy}
+              onClick={() => doAction("stop")}
+            />
+          </div>
+        </div>
+      </header>
+
+      {actionError && (
+        <div className="mx-auto mt-4 w-full max-w-6xl px-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive duration-300 animate-in fade-in">
+            <span>{actionError}</span>
+            <button
+              type="button"
+              onClick={() => setActionError(null)}
+              aria-label="Скрыть"
+              className="shrink-0 rounded-md p-1 hover:bg-destructive/10"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row">
+        <aside className="lg:w-72 lg:shrink-0">
+          <Card className="border-border/60 bg-card/60 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="text-base">Состояние сервера</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-5">
+              <div className="flex flex-col gap-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <Hash className="size-4" />
+                    ID
+                  </span>
+                  <span className="truncate font-mono text-xs">
+                    {serverId.slice(0, 10)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="size-4" />
+                    Аптайм
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {running ? fmtUptime(state.uptimeSec) : "—"}
+                  </span>
+                </div>
+              </div>
+
+              <Separator />
+
+              <UsageStat
+                icon={Cpu}
+                label="Процессор"
+                value={`${state.cpu.toFixed(1)} %`}
+                percent={Math.min(100, state.cpu)}
+                barClass="bg-primary"
+              />
+              <UsageStat
+                icon={MemoryStick}
+                label="Память"
+                value={`${state.ram} / ${state.ramLimit} МБ`}
+                percent={(state.ram / state.ramLimit) * 100}
+                barClass="bg-success"
+              />
+              <UsageStat
+                icon={HardDrive}
+                label="Диск"
+                value={`${state.diskMb} МБ / 1 ГБ`}
+                percent={(state.diskMb / 1024) * 100}
+                barClass="bg-warning"
+              />
+            </CardContent>
+          </Card>
+        </aside>
+
+        <main className="min-w-0 flex-1">
+          <div className="mb-4 inline-flex w-full gap-1 rounded-xl border border-border/60 bg-card/60 p-1 backdrop-blur sm:w-auto">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all sm:flex-none",
+                  tab === t.id
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <t.icon className="size-4" />
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === "console" && (
+            <Card
+              key="console"
+              className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CardHeader className="flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Terminal className="size-4 text-primary" />
+                  Консоль
+                </CardTitle>
+                <span className={cn("text-xs font-medium", meta.text)}>
+                  {meta.label}
+                </span>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {isBusy && (
+                  <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary duration-300 animate-in fade-in">
+                    <Loader2 className="size-4 animate-spin" />
+                    {busy === "start" &&
+                      "Запуск бота… (первый раз занимает чуть дольше)"}
+                    {busy === "stop" && "Остановка бота…"}
+                    {busy === "restart" && "Перезагрузка бота…"}
+                  </div>
+                )}
+                <div
+                  ref={logRef}
+                  className="h-80 overflow-y-auto rounded-lg border border-border/60 bg-[#080b14] p-4 font-mono text-xs leading-relaxed"
+                >
+                  {logs.length === 0 && (
+                    <div className="text-muted-foreground">
+                      Логи пусты. Нажмите «Запустить», чтобы поднять бота.
+                    </div>
+                  )}
+                  {logs.map((line, i) => (
+                    <div
+                      key={`${i}-${line.slice(0, 12)}`}
+                      className={cn(
+                        "whitespace-pre-wrap break-words duration-300 animate-in fade-in",
+                        /✓|успешно|запущен/i.test(line) && "text-success",
+                        /→|heartbeat|тик/i.test(line) && "text-primary",
+                        /error|ошибка|traceback|exception/i.test(line) &&
+                          "text-destructive",
+                      )}
+                    >
+                      {line}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Логи обновляются автоматически каждые 2 секунды.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === "files" && (
+            <Card
+              key="files"
+              className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CardHeader className="flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Folder className="size-4 text-primary" />
+                    Файлы бота
+                  </CardTitle>
+                  <CardDescription>
+                    Код бота. Файл запуска задаётся в «Настройках».
+                  </CardDescription>
+                </div>
+                {!editing && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setEditing({ name: "", content: "", isNew: true })
+                    }
+                  >
+                    <Plus className="size-4" />
+                    Новый файл
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent>
+                {editing ? (
+                  <div className="flex flex-col gap-3 duration-300 animate-in fade-in">
+                    <Input
+                      value={editing.name}
+                      onChange={(e) =>
+                        setEditing({ ...editing, name: e.target.value })
+                      }
+                      placeholder="имя_файла.py"
+                      disabled={!editing.isNew}
+                      className="font-mono"
+                    />
+                    <textarea
+                      value={editing.content}
+                      onChange={(e) =>
+                        setEditing({ ...editing, content: e.target.value })
+                      }
+                      spellCheck={false}
+                      className="h-80 w-full resize-none rounded-lg border border-border/60 bg-[#080b14] p-4 font-mono text-xs leading-relaxed text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      placeholder="# код вашего бота"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        onClick={() => setEditing(null)}
+                        disabled={savingFile}
+                      >
+                        <X className="size-4" />
+                        Отмена
+                      </Button>
+                      <Button onClick={saveFile} disabled={savingFile}>
+                        {savingFile ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Save className="size-4" />
+                        )}
+                        Сохранить
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-lg border border-border/60">
+                    <div className="flex items-center gap-3 border-b border-border/60 bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground">
+                      <span className="flex-1">Имя</span>
+                      <span className="w-20 text-right">Размер</span>
+                      <span className="w-16 text-right">Действия</span>
+                    </div>
+                    {files.length === 0 && (
+                      <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        Файлов нет.
+                      </div>
+                    )}
+                    {files.map((f) => {
+                      const Icon = fileIcons[f.kind];
+                      return (
+                        <div
+                          key={f.name}
+                          className="flex items-center gap-3 border-b border-border/40 px-4 py-2.5 transition-colors last:border-0 hover:bg-muted/30"
+                        >
+                          <Icon
+                            className={cn(
+                              "size-4 shrink-0",
+                              f.kind === "code"
+                                ? "text-blue-400"
+                                : "text-muted-foreground",
+                            )}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => openFile(f.name)}
+                            className="flex-1 truncate text-left text-sm hover:text-primary hover:underline"
+                          >
+                            {f.name}
+                          </button>
+                          <span className="w-20 text-right text-xs tabular-nums text-muted-foreground">
+                            {fmtSize(f.size)}
+                          </span>
+                          <div className="flex w-16 justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7"
+                              aria-label={`Редактировать ${f.name}`}
+                              onClick={() => openFile(f.name)}
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-muted-foreground hover:text-destructive"
+                              aria-label={`Удалить ${f.name}`}
+                              onClick={() => removeFile(f.name)}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === "settings" && (
+            <div className="flex flex-col gap-6">
+            <Card
+              key="settings"
+              className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Settings className="size-4 text-primary" />
+                  Настройки запуска
+                </CardTitle>
+                <CardDescription>
+                  Файл запуска, токен Telegram и автоперезапуск.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={saveSettings} className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="name">Имя сервера</Label>
+                    <Input
+                      id="name"
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      placeholder="Мой первый бот"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="startupFile">Запускаемый файл</Label>
+                    <Input
+                      id="startupFile"
+                      value={form.startupFile}
+                      onChange={(e) =>
+                        setForm({ ...form, startupFile: e.target.value })
+                      }
+                      placeholder="bot.py"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Файл, который движок запустит при старте.{" "}
+                      <span className="font-mono text-foreground">.py</span> →
+                      Python,{" "}
+                      <span className="font-mono text-foreground">.js</span> →
+                      Node.js. Зависимости из{" "}
+                      <span className="font-mono text-foreground">
+                        requirements.txt
+                      </span>{" "}
+                      / <span className="font-mono text-foreground">package.json</span>{" "}
+                      ставятся сами.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="token">Токен Telegram-бота</Label>
+                    <Input
+                      id="token"
+                      type="password"
+                      value={form.token}
+                      onChange={(e) => setForm({ ...form, token: e.target.value })}
+                      placeholder={
+                        config?.tokenSet
+                          ? "Токен сохранён — введите новый, чтобы заменить"
+                          : "123456:ABC-DEF... от @BotFather"
+                      }
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Передаётся боту как{" "}
+                      <span className="font-mono text-foreground">BOT_TOKEN</span>.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Автоперезапуск при сбое</p>
+                      <p className="text-xs text-muted-foreground">
+                        Бот сам поднимется, если упадёт.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={form.autoRestart}
+                      onClick={() =>
+                        setForm({ ...form, autoRestart: !form.autoRestart })
+                      }
+                      className={cn(
+                        "relative h-6 w-11 shrink-0 rounded-full transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                        form.autoRestart ? "bg-primary" : "bg-muted",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform",
+                          form.autoRestart && "translate-x-5",
+                        )}
+                      />
+                    </button>
+                  </div>
+
+                  <Separator />
+
+                  <div className="flex items-center justify-end gap-3">
+                    {savedSettings && (
+                      <span className="flex items-center gap-1.5 text-sm text-success duration-300 animate-in fade-in">
+                        <Check className="size-4" />
+                        Сохранено
+                      </span>
+                    )}
+                    <Button type="submit" disabled={savingSettings}>
+                      {savingSettings ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                      Сохранить
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card
+              key="packages"
+              className="border-border/60 bg-card/60 backdrop-blur duration-300 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Package className="size-4 text-primary" />
+                  Python-библиотеки (pip)
+                </CardTitle>
+                <CardDescription>
+                  Установите дополнительный пакет pip для бота. Он попадёт в{" "}
+                  <span className="font-mono text-foreground">
+                    requirements.txt
+                  </span>{" "}
+                  и будет установлен сразу, если бот сейчас запущен — без
+                  перезапуска.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={pkgInput}
+                    onChange={(e) => setPkgInput(e.target.value)}
+                    placeholder="requests aiohttp==3.9.5"
+                    className="font-mono"
+                    disabled={installingPkg}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        installPackages();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={installPackages}
+                    disabled={installingPkg || !pkgInput.trim()}
+                  >
+                    {installingPkg ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Download className="size-4" />
+                    )}
+                    Установить
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Несколько пакетов — через пробел или запятую, версию можно
+                  указать так:{" "}
+                  <span className="font-mono text-foreground">pandas==2.2.2</span>.
+                  Доступно только для Python-ботов (файл запуска{" "}
+                  <span className="font-mono text-foreground">.py</span>).
+                </p>
+                {pkgResult && (
+                  <div
+                    className={cn(
+                      "flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs duration-300 animate-in fade-in",
+                      pkgResult.ok
+                        ? "border-success/30 bg-success/10 text-success"
+                        : "border-destructive/30 bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {pkgResult.ok ? (
+                        <Check className="size-3.5" />
+                      ) : (
+                        <X className="size-3.5" />
+                      )}
+                      {pkgResult.ok ? "Готово" : "Ошибка установки"}
+                    </span>
+                    {pkgResult.output && (
+                      <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] text-foreground/80">
+                        {pkgResult.output}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  variant,
+  icon: Icon,
+  label,
+  loading,
+  disabled,
+  onClick,
+}: {
+  variant: "success" | "secondary" | "destructive";
+  icon: LucideIcon;
+  label: string;
+  loading: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button variant={variant} size="sm" onClick={onClick} disabled={disabled}>
+      {loading ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+      {label}
+    </Button>
+  );
+}
+
+function UsageStat({
+  icon: Icon,
+  label,
+  value,
+  percent,
+  barClass,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  percent: number;
+  barClass: string;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between text-sm">
+        <span className="flex items-center gap-2 text-muted-foreground">
+          <Icon className="size-4" />
+          {label}
+        </span>
+        <span className="font-medium tabular-nums">{value}</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full transition-all duration-700", barClass)}
+          style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
