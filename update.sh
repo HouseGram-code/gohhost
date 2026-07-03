@@ -35,7 +35,7 @@ echo "📦 Найдены обновления: $OLD_COMMIT → $NEW_COMMIT" | t
 echo "🔄 Применение изменений..." | tee -a "$LOG_FILE"
 git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
 
-# Пересобираем web-контейнер
+# Пересбираем web-контейнер
 echo "🔨 Пересборка контейнера..." | tee -a "$LOG_FILE"
 docker compose build web 2>&1 | tee -a "$LOG_FILE" || {
   echo "❌ Ошибка сборки" | tee -a "$LOG_FILE"
@@ -45,6 +45,11 @@ docker compose build web 2>&1 | tee -a "$LOG_FILE" || {
 # Перезапускаем сервисы (web пересоздаётся с новым образом)
 echo "🚀 Перезапуск сервисов..." | tee -a "$LOG_FILE"
 docker compose up -d 2>&1 | tee -a "$LOG_FILE"
+
+# bot подключает код через bind-mount ./bot, но не перечитывает его сам —
+# перезапускаем явно, чтобы обновления bot.py тоже применялись автоматически.
+echo "🤖 Перезапуск Telegram-бота..." | tee -a "$LOG_FILE"
+docker compose restart bot 2>&1 | tee -a "$LOG_FILE" || true
 
 # Ждём здоровья контейнера
 echo "⏳ Ожидание готовности сервиса..." | tee -a "$LOG_FILE"
