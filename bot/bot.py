@@ -17,7 +17,7 @@ from aiogram.types import (
 
 # ── Конфигурация ─────────────────────────────────────────────────────
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-API_BASE = os.environ.get("API_BASE", "http://web:3000")
+API_BASE = os.environ.get("API_BASE", "http://localhost:3000")
 BOT_API_KEY = os.environ.get("BOT_API_KEY", "")
 SITE_URL = os.environ.get("SITE_URL", "")
 HEADERS = {"x-bot-key": BOT_API_KEY}
@@ -78,8 +78,11 @@ async def cb_servers(c: CallbackQuery) -> None:
                 headers=HEADERS,
             )
         data = r.json()
-    except Exception:
-        await c.message.answer("⚠️ Сервис временно недоступен, попробуйте позже.")
+    except Exception as e:
+        print(f"Error fetching servers: {e}")
+        print(f"API_BASE: {API_BASE}")
+        print(f"Headers: {HEADERS}")
+        await c.message.answer(f"⚠️ Ошибка подключения:\n{type(e).__name__}: {str(e)[:100]}")
         await c.answer()
         return
 
@@ -165,8 +168,10 @@ async def flow_pass(m: Message, state: FSMContext) -> None:
                 headers=HEADERS,
             )
         data = r.json()
-    except Exception:
-        await m.answer("⚠️ Сервис временно недоступен, попробуйте позже.", reply_markup=menu_kb())
+    except Exception as e:
+        print(f"Error creating server: {e}")
+        print(f"API_BASE: {API_BASE}")
+        await m.answer(f"⚠️ Ошибка:\n{type(e).__name__}: {str(e)[:100]}", reply_markup=menu_kb())
         return
 
     if not data.get("ok"):
