@@ -1,0 +1,148 @@
+═══════════════════════════════════════════════════════════════
+  🚨 СРОЧНОЕ ВОССТАНОВЛЕНИЕ СЕРВЕРА
+═══════════════════════════════════════════════════════════════
+
+Сервер не отвечает (ERR_NGROK_3004).
+Выполните эти команды по SSH для восстановления:
+
+───────────────────────────────────────────────────────────────
+  ⚡ БЫСТРОЕ ВОССТАНОВЛЕНИЕ (скопируй целиком)
+───────────────────────────────────────────────────────────────
+
+ssh root@31.129.101.71 << 'ENDSSH'
+cd /root/goh-hosting
+echo "📊 Статус контейнеров:"
+docker compose ps
+echo ""
+echo "🔄 Перезапуск всех сервисов..."
+docker compose restart
+sleep 10
+echo ""
+echo "✅ Проверка после перезапуска:"
+docker compose ps
+echo ""
+echo "📋 Последние 20 строк логов web:"
+docker compose logs web --tail 20
+ENDSSH
+
+───────────────────────────────────────────────────────────────
+  🔨 ЕСЛИ ПЕРЕЗАПУСК НЕ ПОМОГ
+───────────────────────────────────────────────────────────────
+
+ssh root@31.129.101.71 << 'ENDSSH'
+cd /root/goh-hosting
+echo "🔄 Скачивание последних изменений..."
+git pull origin main
+echo ""
+echo "🔨 Пересборка web-контейнера..."
+docker compose build web
+echo ""
+echo "🚀 Перезапуск сервисов..."
+docker compose up -d
+sleep 15
+echo ""
+echo "✅ Проверка:"
+docker compose ps
+echo ""
+docker compose logs web --tail 30
+ENDSSH
+
+───────────────────────────────────────────────────────────────
+  💣 ПОЛНАЯ ПЕРЕУСТАНОВКА (если всё сломано)
+───────────────────────────────────────────────────────────────
+
+ssh root@31.129.101.71 << 'ENDSSH'
+cd /root/goh-hosting
+echo "💾 Резервная копия данных..."
+cp -r data data.backup.$(date +%Y%m%d_%H%M%S)
+echo ""
+echo "🛑 Остановка и удаление..."
+docker compose down
+docker image prune -f
+echo ""
+echo "🔨 Полная пересборка..."
+docker compose build --no-cache
+echo ""
+echo "🚀 Запуск..."
+docker compose up -d
+sleep 20
+echo ""
+echo "✅ Финальная проверка:"
+docker compose ps
+docker compose logs --tail 50
+ENDSSH
+
+───────────────────────────────────────────────────────────────
+  🔍 ДИАГНОСТИКА (если нужно понять причину)
+───────────────────────────────────────────────────────────────
+
+# Подключиться к серверу
+ssh root@31.129.101.71
+
+# Перейти в папку проекта
+cd /root/goh-hosting
+
+# Посмотреть статус
+docker compose ps
+
+# Полные логи web
+docker compose logs web
+
+# Полные логи ngrok
+docker compose logs tunnel
+
+# Полные логи всех сервисов
+docker compose logs
+
+# Проверка web изнутри контейнера
+docker compose exec web node -e "fetch('http://127.0.0.1:3000/').then(r=>console.log('Status:',r.status)).catch(e=>console.error('Error:',e.message))"
+
+# Проверка переменных окружения
+docker compose exec web printenv | grep -E 'NODE_ENV|SESSION_SECRET|DATA_DIR'
+
+# Проверка .env файла
+cat .env
+
+───────────────────────────────────────────────────────────────
+  ✅ ПОСЛЕ ВОССТАНОВЛЕНИЯ
+───────────────────────────────────────────────────────────────
+
+1. Откройте: https://herma-nonhydrated-meaninglessly.ngrok-free.app
+   
+2. Должна загрузиться главная страница
+
+3. Проверьте бота в Telegram: /start
+
+4. Если всё работает — настройте автообновление:
+   ssh root@31.129.101.71
+   cd /root/goh-hosting
+   bash install-auto-update-cron.sh
+
+───────────────────────────────────────────────────────────────
+  📞 ВАЖНЫЕ КОМАНДЫ
+───────────────────────────────────────────────────────────────
+
+# Быстрый перезапуск
+docker compose restart
+
+# Пересборка web
+docker compose build web && docker compose up -d
+
+# Остановка
+docker compose down
+
+# Запуск
+docker compose up -d
+
+# Логи в реальном времени
+docker compose logs -f
+
+# Статус
+docker compose ps
+
+───────────────────────────────────────────────────────────────
+
+💡 СОВЕТ: После восстановления настройте автообновление через cron,
+   чтобы сервер сам подтягивал изменения из GitHub каждые 5 минут.
+
+═══════════════════════════════════════════════════════════════

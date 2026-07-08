@@ -179,6 +179,93 @@ export async function deleteFile(id: string, name: string): Promise<void> {
   await fs.rm(safeJoin(id, name), { force: true, recursive: true });
 }
 
+// ── Python-библиотеки (pip) ──────────────────────────────────────────────
+// Каждый токен передаётся как отдельный элемент argv в `docker exec`
+// (без шелла), поэтому инъекция команд невозможна — регекспом просто
+// отсекаем опечатки и явно мусор в имени пакета.
+const PACKAGE_RE =
+  /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9,._-]+\])?(?:(?:==|>=|<=|~=|!=|>|<)[A-Za-z0-9._*+-]+)?$/;
+
+export function parsePackages(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function packageBaseName(spec: string): string {
+  return spec.split(/[=<>!~[]/)[0].toLowerCase();
+}
+
+export interface InstallResult {
+  ok: boolean;
+  output: string;
+  installed: string[];
+}
+
+export async function installPackage(
+  id: string,
+  raw: string,
+): Promise<InstallResult> {
+  const cfg = await getConfig(id);
+  if (!/\.py$/i.test(cfg.startupFile)) {
+    throw new Error(
+      "Установка pip-библиотек доступна только для Python-ботов (файл запуска .py)",
+    );
+  }
+
+  const packages = parsePackages(raw);
+  if (packages.length === 0) throw new Error("Укажите хотя бы один пакет");
+  for (const p of packages) {
+    if (!PACKAGE_RE.test(p)) throw new Error(`Некорректное имя пакета: ${p}`);
+  }
+
+  // Сохраняем в requirements.txt — библиотека доустановится и при
+  // следующих запусках/рестартах (startCommand ставит зависимости
+  // из этого файла при каждом старте).
+  await ensureDirs(id);
+  const reqPath = safeJoin(id, "requirements.txt");
+  let lines: string[] = [];
+  try {
+    lines = (await fs.readFile(reqPath, "utf8"))
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+  } catch {
+    /* requirements.txt ещё нет */
+  }
+  const known = new Set(lines.map(packageBaseName));
+  for (const p of packages) {
+    const base = packageBaseName(p);
+    if (known.has(base)) {
+      lines = lines.map((l) => (packageBaseName(l) === base ? p : l));
+    } else {
+      lines.push(p);
+      known.add(base);
+    }
+  }
+  await fs.writeFile(reqPath, lines.join("\n") + "\n", "utf8");
+
+  // Если бот сейчас работает — ставим сразу, без ожидания рестарта.
+  const info = await docker.inspect(containerName(id)).catch(() => null);
+  if (info?.State.Running) {
+    const res = await docker.exec(containerName(id), [
+      "pip",
+      "install",
+      "--no-cache-dir",
+      ...packages,
+    ]);
+    return { ok: res.exitCode === 0, output: res.output, installed: packages };
+  }
+
+  return {
+    ok: true,
+    installed: packages,
+    output:
+      "Бот сейчас не запущен. Библиотека добавлена в requirements.txt и установится автоматически при следующем запуске.",
+  };
+}
+
 async function dirSizeMb(id: string): Promise<number> {
   let total = 0;
   const walk = async (dir: string) => {

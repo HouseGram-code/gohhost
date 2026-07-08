@@ -122,6 +122,7 @@ goh-hosting/
 ├── deployment/           # Скрипты развёртывания
 ├── docker-compose.yml    # Конфигурация сервисов
 ├── Dockerfile            # Образ Next.js приложения
+├── Dockerfile.daytona    # Для Daytona (всё в одном)
 ├── update.sh             # Скрипт автообновления
 └── .env                  # Переменные окружения (создайте из .env.example)
 ```
@@ -227,6 +228,17 @@ docker compose logs tunnel
 3. Commit изменения: `git commit -m 'feat: добавил крутую фичу'`
 4. Push в ветку: `git push origin feature/amazing-feature`
 5. Откройте Pull Request
+
+## ☁️ Развёртывание на Daytona
+
+Daytona — облачная IDE для разработки. Подходит для разработки, тестирования и демо.
+
+**Запуск:**
+1. https://app.daytona.io → "New Workspace"
+2. Repository: `https://github.com/HouseGram-code/gohhost.git`
+3. В Terminal: `bash daytona-deploy.sh`
+
+📖 [DAYTONA_DEPLOY.md](./DAYTONA_DEPLOY.md) | [DAYTONA_QUICK.txt](./DAYTONA_QUICK.txt)
 
 ## 📄 Лицензия
 

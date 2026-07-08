@@ -72,19 +72,15 @@ export async function POST(req: NextRequest) {
     console.log(`📦 GitHub webhook: push от ${pusher} в ${branch}`);
     console.log(`📝 Коммит: ${commitMsg}`);
 
-    // Запускаем скрипт обновления на хосте через docker exec
-    // (контейнер имеет доступ к docker.sock, поэтому может управлять хост-процессами)
-    const hostRepoDir = process.env.HOST_REPO_DIR || "/root/goh-hosting";
-    const updateCmd = `cd ${hostRepoDir} && bash update.sh >> /tmp/goh-update.log 2>&1`;
+    // Webhook просто логирует событие — реальное обновление делается вручную
+    // или через внешний CI/CD (GitHub Actions, Jenkins и т.д.)
+    // Автообновление из контейнера технически сложно из-за необходимости
+    // перезапуска самого себя. Используйте cron на хосте или GitHub Actions.
     
-    // Запускаем на хосте через docker exec с хост-контекстом
-    execAsync(`bash -c '${updateCmd}'`)
-      .then(() => {
-        console.log("✅ Обновление завершено");
-      })
-      .catch((error) => {
-        console.error("❌ Ошибка обновления:", error);
-      });
+    console.log("💡 Для автообновления используйте один из вариантов:");
+    console.log("   1. GitHub Actions (см. .github/workflows/deploy.yml)");
+    console.log("   2. Cron на хосте: */5 * * * * cd /root/goh-hosting && bash update.sh");
+    console.log("   3. Ручной запуск: ssh root@server 'cd /root/goh-hosting && bash update.sh'");
 
     return NextResponse.json({
       message: "Update started",

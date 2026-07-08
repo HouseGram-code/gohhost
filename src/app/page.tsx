@@ -220,10 +220,11 @@ export default function Home() {
 
         {/* Преимущества */}
         <section className="grid w-full gap-4 pb-8 sm:grid-cols-3">
-          {features.map((feature) => (
+          {features.map((feature, i) => (
             <Card
               key={feature.title}
-              className="border-border/60 bg-card/60 backdrop-blur transition-colors hover:border-primary/40"
+              style={{ animationDelay: `${i * 100}ms` }}
+              className="animate-in fade-in slide-in-from-bottom-6 border-border/60 bg-card/60 backdrop-blur duration-700 transition-all hover:-translate-y-1.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
             >
               <CardHeader>
                 <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/20">
@@ -261,7 +262,8 @@ export default function Home() {
             {steps.map((s, i) => (
               <Card
                 key={s.title}
-                className="border-border/60 bg-card/60 backdrop-blur transition-colors hover:border-primary/40"
+                style={{ animationDelay: `${i * 100}ms` }}
+                className="animate-in fade-in slide-in-from-bottom-6 border-border/60 bg-card/60 backdrop-blur duration-700 transition-all hover:-translate-y-1.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
               >
                 <CardHeader>
                   <div className="mb-2 flex items-center justify-between">
@@ -316,8 +318,8 @@ export default function Home() {
             первого бота прямо сейчас.
           </p>
 
-          <Card className="relative mt-10 w-full max-w-md overflow-hidden border-primary/40 bg-card/80 shadow-2xl shadow-primary/10 backdrop-blur">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
+          <Card className="group relative mt-10 w-full max-w-md animate-in fade-in slide-in-from-bottom-8 overflow-hidden border-primary/40 bg-card/80 shadow-2xl shadow-primary/10 backdrop-blur duration-700 transition-all hover:-translate-y-1.5 hover:shadow-primary/25">
+            <div className="absolute inset-x-0 top-0 h-px animate-pulse bg-gradient-to-r from-transparent via-primary to-transparent" />
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-xl">Бесплатный</CardTitle>
@@ -387,7 +389,8 @@ export default function Home() {
             {rules.map((r, i) => (
               <Card
                 key={r.title}
-                className="border-border/60 bg-card/60 backdrop-blur transition-colors hover:border-primary/40"
+                style={{ animationDelay: `${i * 80}ms` }}
+                className="animate-in fade-in slide-in-from-bottom-6 border-border/60 bg-card/60 backdrop-blur duration-700 transition-all hover:-translate-y-1.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
               >
                 <CardContent className="flex items-start gap-4 py-5">
                   <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/20">
@@ -419,16 +422,21 @@ export default function Home() {
       {/* Подвал */}
       <footer className="mx-auto w-full max-w-6xl px-6 py-8">
         <Separator className="mb-6" />
-        <div className="flex flex-col items-center justify-between gap-3 text-sm text-muted-foreground sm:flex-row">
+        <div className="flex flex-col items-center justify-center gap-4 sm:flex-row sm:justify-between">
           <div className="flex items-center gap-2">
             <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Bot className="size-3.5" />
             </div>
-            <span>Goh Hosting</span>
-            <span className="text-muted-foreground/50">·</span>
-            <span>бета 1.0</span>
+            <span className="text-sm font-medium text-muted-foreground">
+              Goh Hosting
+            </span>
           </div>
-          <span>© 2026 Goh Hosting. Все права защищены.</span>
+          <Button asChild variant="ghost" size="sm" className="group">
+            <a href={panelUrl}>
+              Панель управления
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+            </a>
+          </Button>
         </div>
       </footer>
     </div>

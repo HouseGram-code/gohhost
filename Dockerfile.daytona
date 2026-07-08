@@ -1,0 +1,46 @@
+# Dockerfile для Daytona (всё в одном контейнере)
+# Используется когда Docker Compose недоступен
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Установка Python для бота
+RUN apk add --no-cache python3 py3-pip git
+
+# Переменные окружения
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Копирование файлов проекта
+COPY package*.json ./
+COPY . .
+
+# Установка Node.js зависимостей
+RUN npm install --production
+
+# Установка Python зависимостей для бота
+RUN pip install --no-cache-dir -r bot/requirements.txt
+
+# Сборка Next.js
+RUN npm run build
+
+# Создание непривилегированного пользователя
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Копирование собранного приложения
+COPY --chown=nextjs:nodejs .next/standalone ./
+COPY --chown=nextjs:nodejs .next/static ./.next/static
+COPY --chown=nextjs:nodejs public ./public
+COPY --chown=nextjs:nodejs bot ./bot
+
+USER nextjs
+
+# Expose порт
+EXPOSE 3000
+
+# Скрипт запуска обоих приложений
+CMD ["sh", "-c", "node server.js & python bot/bot.py"]
